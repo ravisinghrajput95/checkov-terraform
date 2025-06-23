@@ -1,0 +1,102 @@
+name: Terraform Module Deployment to JFrog
+
+on:
+    workflow_dispatch:
+    push:
+      branches: [ "main" ]
+    pull_request:
+      branches: [ "main" ]
+
+jobs:
+    terraform:
+      name: Publish Terraform Module to JFrog
+      runs-on: ubuntu-latest
+
+      steps:
+        - name: Checkout Repository
+          uses: actions/checkout@v4
+
+        - name: Setup Jfrog CLI
+          uses: jfrog/setup-jfrog-cli@v4
+          env:
+            JF_URL: ${{ vars.JF_URL }}
+            JF_USER: ${{ secrets.JF_USER }}
+            JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+        
+        - name: Scan IaC manifests
+          id: scan_modules
+          run: |
+            jf audit > scan_results.txt
+            cat scan_results.txt
+            if grep -q -E "High|Critical" scan_results.txt; then
+              echo "found_scan_issue=true" >> $GITHUB_ENV
+            else
+              echo "found_scan_issue=false" >> $GITHUB_ENV
+            fi
+
+        - name: Upload scan results
+          uses: actions/upload-artifact@v4
+          with:
+            name: scan_results.txt
+            path: scan_results.txt
+
+        - name: Decide based on scans
+          run: |
+            if [ "$found_scan_issue" == "true" ]; then
+              echo "Issues found in scans, failing the job."
+              exit 0
+            else
+              echo "No issues found in scans, job successful."
+            fi
+
+        - name: Set Terraform Repository
+          run: |
+            jf terraform-config --repo-deploy=${{ secrets.JF_TERRAFORM_REPO }}
+
+        - name: Publish Terraform Module to Artifactory (v0.0.1)
+          run: |
+            jf terraform publish --namespace=example --provider=aws --tag=v0.0.1
+
+        - name: Publish Terraform Module to Artifactory (v0.0.2) with Exclusions
+          run: |
+            jf terraform publish --namespace=example --provider=aws --tag=v0.0.2 --exclusions="*test*;*ignore*"
+
+        - name: Configure AWS Credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: us-east-1
+        
+        - name: Install Terraform
+          uses: hashicorp/setup-terraform@v3
+
+        - name: Configure Terraform Login for JFrog Artifactory
+          run: |
+            mkdir -p ~/.terraform.d
+            echo '{ "credentials": { "${{ secrets.TERRAFORM_HOSTNAME }}": { "token": "${{ secrets.TERRAFORM_API_TOKEN }}" } } }' > ~/.terraform.d/credentials.tfrc.json
+
+        - name: Terraform fmt
+          id: fmt
+          run: terraform fmt -check
+          continue-on-error: true
+        
+        - name: Initialize Terraform    
+          run: |
+            terraform init -upgrade
+          
+        - name: create Terraform workspace
+          run: |
+            terraform workspace new my-prefix-test
+
+        - name: Terraform Validate
+          id: validate
+          run: terraform validate -no-color
+        
+        - name: Provision Infrastructure
+          id: provision
+          run: |
+            terraform apply --auto-approve -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+
+        
