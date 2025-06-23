@@ -1,6 +1,6 @@
 # Vulnerable Terraform Modules
 
-This repository contains intentionally vulnerable Terraform modules for testing **JFrog Advanced Security (JAS)**.
+This repository contains intentionally vulnerable Terraform modules for testing **Checkov**.
 
 ### ⚠️ WARNING
 **DO NOT DEPLOY IN PRODUCTION!**  
