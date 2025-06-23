@@ -8,7 +8,7 @@ on:
 
 jobs:
   tfsec:
-    name: Run tfsec sarif report
+    name: Run checkov sarif report
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -28,5 +28,13 @@ jobs:
         id: checkov
         uses: bridgecrewio/checkov-action@master
         with:
-          directory: example/examplea
+          directory: .
           framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        if: success() || failure()
+        with:
+          sarif_file: results.sarif
